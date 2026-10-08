@@ -26,6 +26,25 @@ async def scrape_ig_profile(username):
 
     return profile
 
+async def scrape_linkedin_profile(url):
+    apify_client = ApifyClientAsync(TOKEN)
+
+    actor_client = apify_client.actor("harvestapi/linkedin-profile-scraper")
+    call_result = await actor_client.call(run_input={
+        "profileScraperMode": "Profile details no email ($4 per 1k)",
+        "queries": [url]
+    })
+
+    if call_result is None:
+        return None
+
+    dataset_client = apify_client.dataset(call_result["defaultDatasetId"])
+    list_items_result = await dataset_client.list_items()
+
+    profile = list_items_result.items[0]
+
+    return profile
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
     import asyncio
@@ -33,6 +52,6 @@ if __name__ == "__main__":
     load_dotenv()
     init()
 
-    result = asyncio.run(scrape_ig_profile("sspsprague"))
+    result = asyncio.run(scrape_linkedin_profile("https://cz.linkedin.com/in/pavel-vr%C3%A1na-577336297"))
 
     print(result)
