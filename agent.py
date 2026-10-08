@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from tool import PersonReport   # schéma z tool.py
+
 load_dotenv()
 client = genai.Client()
 
@@ -18,21 +20,55 @@ First check whether the search results really refer to the same person
 If you find nothing, say that clearly. Never invent facts.
 Do not infer sensitive characteristics (health, religion, politics, etc.)."""
 
-config = types.GenerateContentConfig(
+# Krok 1: vyhledávání (Google Search, bez JSON schématu)
+search_config = types.GenerateContentConfig(
     system_instruction=SYSTEM,
     tools=[types.Tool(google_search=types.GoogleSearch())],
 )
 
-def check_candidate(info: str):
+# Krok 2: převod do JSON (JSON schéma, bez nástrojů)
+json_config = types.GenerateContentConfig(
+    system_instruction=SYSTEM,
+    response_mime_type="application/json",
+    response_schema=PersonReport,
+)
+
+def search_step(info: str) -> str:
     response = client.models.generate_content(
         model=MODEL,
         contents=info,
-        config=config,
+        config=search_config,
     )
-    print(response.text)
+    text = response.text or ""
 
-    meta = response.candidates[0].grounding_metadata
-    if meta and meta.grounding_chunks:
-        print("\nZdroje:")
-        for chunk in meta.grounding_chunks:
-            print("-", chunk.web.title, chunk.web.uri)
+    # připojí zdroje, které vyhledávání skutečně použilo
+    try:
+        meta = response.candidates[0].grounding_metadata
+        if meta and meta.grounding_chunks:
+            text += "\n\nSources:\n" + "\n".join(
+                f"- {c.web.title}: {c.web.uri}" for c in meta.grounding_chunks if c.web
+            )
+    except (IndexError, AttributeError):
+        pass
+
+    return text
+
+def json_step(notes: str) -> PersonReport:
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=(
+            "Convert the notes below into the structured report. "
+            "Use only information from the notes, do not invent anything. "
+            "If something is missing, leave it empty.\n\n" + notes
+        ),
+        config=json_config,
+    )
+    return response.parsed
+
+def check_candidate(info: str) -> PersonReport:
+    notes = search_step(info)
+    return json_step(notes)
+
+def check_candidate(info: str) -> PersonReport:
+    notes = search_step(info)
+    return json_step(notes)
