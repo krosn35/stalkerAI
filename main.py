@@ -1,12 +1,11 @@
 import os
 from dotenv import load_dotenv
 
+from agent import check_candidate
+
 def main():
     load_dotenv()
-
     print(".env test: " + os.getenv("TEST"))
-
-    from agent import check_candidate
 
     info = input("Údaje o kandidátovi: ")
     report = check_candidate(info)
