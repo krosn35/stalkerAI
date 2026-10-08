@@ -9,3 +9,4 @@ duckduckgo-search
 customtkinter
 google-genai
 apify-client
+pillow
