@@ -7,3 +7,4 @@ python-dotenv
 pydantic
 duckduckgo-search
 google-genai
+apify-client
