@@ -2,9 +2,13 @@
 
 Architecture:
 - UI runs in the main thread with CustomTkinter components.
+
 - Agent logic streams in a background worker thread.
+
 - Queue polling updates UI dynamically without freezing the event loop.
+
 - Opaque backgrounds configured for Linux compositors (Hyprland / Wayland).
+
 """
 
 import queue
@@ -13,7 +17,6 @@ import customtkinter as ctk
 
 # Color Palette inspired by modern AI workspaces
 BG_DARK = "#0D0E12"       # Main workspace background
-SIDEBAR_BG = "#13141A"    # Sidebar background
 CARD_BG = "#1A1B23"       # Card / Agent response background
 BORDER_PURPLE = "#8B5CF6" # Accent highlight
 TEXT_MUTED = "#8E8F9A"    # Subtitles and muted labels
@@ -61,79 +64,41 @@ class AgentApp(ctk.CTk):
         self.after(50, self._poll_events)
 
     def _build_widgets(self):
-        # Master Layout Grid
-        self.grid_columnconfigure(0, weight=0)  # Sidebar
-        self.grid_columnconfigure(1, weight=1)  # Main Content
+        # Master Layout Grid (Single Column)
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ---------------- 1. SIDEBAR PANEL ----------------
-        self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0, fg_color=SIDEBAR_BG)
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(6, weight=1)
+        # ---------------- MAIN WORKSPACE ----------------
+        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_container.grid(row=0, column=0, sticky="nsew", padx=30, pady=20)
+        self.main_container.grid_columnconfigure(0, weight=1)
+        self.main_container.grid_rowconfigure(1, weight=1)
 
-        # Brand Header
-        self.brand_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.brand_frame.grid(row=0, column=0, padx=20, pady=(20, 15), sticky="ew")
+        # ---------------- TOP HEADER BAR ----------------
+        self.top_bar = ctk.CTkFrame(self.main_container, fg_color="transparent", height=40)
+        self.top_bar.grid(row=0, column=0, sticky="ew", pady=(0, 15))
 
         self.logo_lbl = ctk.CTkLabel(
-            self.brand_frame, text="🤖 StalkerAI", font=ctk.CTkFont(size=20, weight="bold")
+            self.top_bar, text="🤖 StalkerAI", font=ctk.CTkFont(size=20, weight="bold")
         )
         self.logo_lbl.pack(side="left")
 
-        # New Chat Pill Button
+        # New Chat Pill Button moved to top bar
         self.new_chat_btn = ctk.CTkButton(
-            self.sidebar,
+            self.top_bar,
             text="+ New Chat",
-            height=38,
-            corner_radius=20,
+            height=34,
+            corner_radius=17,
             fg_color="#272832",
             hover_color="#333444",
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._reset_to_welcome
         )
-        self.new_chat_btn.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="ew")
-
-        # Status & Model Selection
-        self.model_lbl = ctk.CTkLabel(
-            self.sidebar, text="MODEL", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED
-        )
-        self.model_lbl.grid(row=2, column=0, padx=20, pady=(10, 2), sticky="w")
-
-        self.model_badge = ctk.CTkOptionMenu(
-            self.sidebar,
-            values=["gemini-2.5-flash", "gemini-2.5-pro"],
-            fg_color="#20212B",
-            button_color="#2A2B36"
-        )
-        self.model_badge.grid(row=3, column=0, padx=20, pady=(0, 15), sticky="ew")
-
-        self.status_var = ctk.StringVar(value="Status: Ready")
-        self.status_badge = ctk.CTkLabel(
-            self.sidebar, textvariable=self.status_var, font=ctk.CTkFont(size=12), text_color="#38BDF8"
-        )
-        self.status_badge.grid(row=4, column=0, padx=20, pady=5, sticky="w")
-
-        # Clear Canvas Action Button
-        self.clear_btn = ctk.CTkButton(
-            self.sidebar,
-            text="Clear Canvas",
-            fg_color="transparent",
-            border_width=1,
-            border_color="#2A2B36",
-            hover_color="#20212B",
-            command=self._reset_to_welcome
-        )
-        self.clear_btn.grid(row=7, column=0, padx=20, pady=20, sticky="ew")
-
-        # ---------------- 2. MAIN WORKSPACE ----------------
-        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_container.grid(row=0, column=1, sticky="nsew", padx=30, pady=20)
-        self.main_container.grid_rowconfigure(0, weight=1)
-        self.main_container.grid_columnconfigure(0, weight=1)
+        self.new_chat_btn.pack(side="right")
 
         # Center Container (Holds Welcome Screen or Scroll Feed)
         self.center_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.center_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 15))
+        self.center_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 15))
         self.center_frame.grid_columnconfigure(0, weight=1)
         self.center_frame.grid_rowconfigure(0, weight=1)
 
@@ -149,17 +114,12 @@ class AgentApp(ctk.CTk):
         header_container = ctk.CTkFrame(self.welcome_frame, fg_color="transparent")
         header_container.pack(expand=True)
 
-        ctk.CTkLabel(header_container, text="✨", font=ctk.CTkFont(size=36)).pack(pady=(0, 5))
-        ctk.CTkLabel(header_container, text="StalkerAI", font=ctk.CTkFont(size=14), text_color=TEXT_MUTED).pack()
-        ctk.CTkLabel(header_container, text="How Can I Assist You?", font=ctk.CTkFont(size=32, weight="bold")).pack(pady=(5, 30))
+        ctk.CTkLabel(header_container, text="StalkerAI", font=ctk.CTkFont(size=64), text_color=TEXT_MUTED).pack()
+        ctk.CTkLabel(header_container, text="How Can I Assist You?", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(5, 30))
 
         # Quick Action Prompt Cards Row
         cards_row = ctk.CTkFrame(header_container, fg_color="transparent")
         cards_row.pack()
-
-        self._create_quick_card(cards_row, "📋 Plan hackathon project tasks", "Break down backend and UI steps")
-        self._create_quick_card(cards_row, "🔍 Research Gemini API tools", "Explore function calling capabilities")
-        self._create_quick_card(cards_row, "⚡ Generate Python agent script", "Write streaming worker threads")
 
     def _create_quick_card(self, parent, title, subtitle):
         card = ctk.CTkFrame(parent, width=220, height=90, fg_color=CARD_BG, corner_radius=12, border_width=1, border_color="#2A2B36")
@@ -190,7 +150,7 @@ class AgentApp(ctk.CTk):
             border_width=1,
             border_color=BORDER_PURPLE
         )
-        self.input_dock.grid(row=1, column=0, sticky="ew")
+        self.input_dock.grid(row=2, column=0, sticky="ew")
         self.input_dock.grid_columnconfigure(0, weight=1)
 
         self.entry = ctk.CTkEntry(
@@ -302,12 +262,10 @@ class AgentApp(ctk.CTk):
 
     def stop(self):
         self.stop_event.set()
-        self.status_var.set("Status: Stopping...")
 
     def _set_busy(self, busy):
         self.send_btn.configure(state="disabled" if busy else "normal")
         self.stop_btn.configure(state="normal" if busy else "disabled")
-        self.status_var.set("Status: Working..." if busy else "Status: Ready")
 
     # ---------------- EVENT POLLING ----------------
     def _poll_events(self):
@@ -337,6 +295,7 @@ class AgentApp(ctk.CTk):
         except queue.Empty:
             pass
         self.after(50, self._poll_events)
+
 
 
 if __name__ == "__main__":
