@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-from tool import PersonReport   # schéma z tool.py
+from tools import PersonReport   # schéma z tool.py
 
 load_dotenv()
 client = genai.Client()
@@ -20,13 +20,11 @@ First check whether the search results really refer to the same person
 If you find nothing, say that clearly. Never invent facts.
 Do not infer sensitive characteristics (health, religion, politics, etc.)."""
 
-# Krok 1: vyhledávání (Google Search, bez JSON schématu)
 search_config = types.GenerateContentConfig(
     system_instruction=SYSTEM,
     tools=[types.Tool(google_search=types.GoogleSearch())],
 )
 
-# Krok 2: převod do JSON (JSON schéma, bez nástrojů)
 json_config = types.GenerateContentConfig(
     system_instruction=SYSTEM,
     response_mime_type="application/json",
@@ -41,7 +39,6 @@ def search_step(info: str) -> str:
     )
     text = response.text or ""
 
-    # připojí zdroje, které vyhledávání skutečně použilo
     try:
         meta = response.candidates[0].grounding_metadata
         if meta and meta.grounding_chunks:
