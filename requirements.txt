@@ -6,5 +6,6 @@ langchain-anthropic
 python-dotenv
 pydantic
 duckduckgo-search
+customtkinter
 google-genai
 apify-client
