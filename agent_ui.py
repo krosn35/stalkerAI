@@ -1,20 +1,12 @@
-"""StalkerAI - modern CustomTkinter UI for an AI agent.
-
-Architecture:
-- The UI lives in the main thread (CustomTkinter widgets).
-- The agent runs in a worker thread and pushes events into a queue.Queue.
-- _poll_events() drains the queue every 50 ms, so the UI never freezes.
-
-Events the agent can emit: "token", "thought", "tool", "done", "error".
-"""
-
+import json
+import os
 import queue
+import re
 import threading
 import tkinter.font as tkfont
 import customtkinter as ctk
 import tkinter as tk
 from PIL import Image, ImageDraw, ImageTk
-
 
 # Linux: avoid DPI scaling surprises
 ctk.deactivate_automatic_dpi_awareness()
@@ -24,7 +16,6 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 APP_NAME = "StalkerAI"
-MODEL = "gemini-3.8-flash"
 
 # ---------------------------------------------------------------- THEME ----
 BG = "#0B0C10"
@@ -41,32 +32,25 @@ GREEN = "#34D399"
 AMBER = "#F59E0B"
 RED = "#EF4444"
 
+
+
+
 # ------------------------------------------------- SMOOTH (ANTI-ALIASED) ----
 class SmoothFrame(tk.Canvas):
-    """Rounded box with smooth edges.
-
-    Tk draws rounded shapes without anti-aliasing, which looks pixelated on
-    Linux. This box is a Pillow image drawn 4x larger and shrunk down.
-    Put child widgets into `.body`.
-    """
-
     def __init__(self, master, radius=12, fill=CARD, border=None, bw=1,
                  bg=BG, size=None):
-        super().__init__(master, bg=bg, highlightthickness=0, bd=0,
-                         width=40, height=30)
+        super().__init__(master, bg=bg, highlightthickness=0, bd=0, width=40, height=30)
         self.radius = radius
         self.fill = fill
         self.border = border
         self.bw = bw
         self.fixed = size
-        # a square child must not poke out of the rounded corners
         self.inset = int(min(radius, 20) * 0.3) + (bw if border else 0) + 1
         self._photo = None
         self._key = None
 
         self.body = tk.Frame(self, bg=fill)
-        self._win = self.create_window(self.inset, self.inset,
-                                       window=self.body, anchor="nw")
+        self._win = self.create_window(self.inset, self.inset, window=self.body, anchor="nw")
         if size:
             self.configure(width=size[0], height=size[1])
             self.itemconfigure(self._win, width=size[0] - 2 * self.inset,
@@ -103,20 +87,16 @@ class SmoothFrame(tk.Canvas):
 
 
 class SmoothButton(SmoothFrame):
-    """Clickable SmoothFrame with a text label and hover colour."""
-
     def __init__(self, master, text, command, fill, hover, fg="white",
                  font=None, radius=12, border=None, bg=BG, size=None,
                  padx=10, pady=2):
-        super().__init__(master, radius=radius, fill=fill, border=border,
-                         bg=bg, size=size)
+        super().__init__(master, radius=radius, fill=fill, border=border, bg=bg, size=size)
         self.command = command
         self.base = fill
         self.hover = hover
         self.fg = fg
         self.enabled = True
-        self.label = tk.Label(self.body, text=text, fg=fg, bg=fill,
-                              font=font, cursor="hand2")
+        self.label = tk.Label(self.body, text=text, fg=fg, bg=fill, font=font, cursor="hand2")
         if size:
             self.label.pack(expand=True)
         else:
@@ -167,18 +147,29 @@ class SmoothButton(SmoothFrame):
 
 # ---------------------------------------------------------------- AGENT ----
 def run_agent(user_text, emit, stop_event):
-    from google import genai
     try:
-        client = genai.Client()
-        stream = client.models.generate_content_stream(
-            model=MODEL,
-            contents=user_text,
-        )
-        for chunk in stream:
-            if stop_event.is_set():
-                break
-            if chunk.text:
-                emit("token", chunk.text)
+        user_text = user_text.strip()
+        match = re.search(r"(https?://\S+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/\S*)?)", user_text)
+
+        if match:
+            url = match.group(0)
+            if not url.startswith(("http://", "https://")):
+                url = "https://" + url
+
+            emit("tool", f"apify crawl {url}")
+
+            profiles_list = apify_scrape(url)
+
+            if not stop_event.is_set():
+                # Emit raw list object log to terminal or debugging
+                print("Structured Profiles Object:", json.dumps(profiles_list, indent=2))
+
+                # Emit Markdown table format to the UI
+                table_output = format_profiles_to_markdown_table(profiles_list)
+                emit("token", table_output)
+        else:
+            emit("error", "Please provide a valid URL or domain.")
+
         emit("done", "")
     except Exception as e:
         emit("error", str(e))
@@ -217,7 +208,6 @@ class AgentApp(ctk.CTk):
         self._build_ui()
         self.after(50, self._poll_events)
 
-    # ------------------------------------------------------------ helpers --
     def _pick_family(self, options):
         available = set(tkfont.families(self))
         for name in options:
@@ -237,7 +227,7 @@ class AgentApp(ctk.CTk):
             return max(260, min(680, int(width * 0.6)))
         if kind == "chip":
             return max(240, min(700, width - 200))
-        return max(280, min(820, width - 110))  # agent / error
+        return max(280, min(820, width - 110))
 
     def _track(self, label, kind):
         self.wrap_labels.append((label, kind))
@@ -247,7 +237,6 @@ class AgentApp(ctk.CTk):
         self.row += 1
         return r
 
-    # --------------------------------------------------------- main layout --
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -288,11 +277,9 @@ class AgentApp(ctk.CTk):
 
         pill = SmoothFrame(right, radius=16, fill=PANEL, border=BORDER)
         pill.pack(side="left", padx=(0, 10))
-        self.status_dot = tk.Label(pill.body, text="●", font=self.F(10),
-                                   fg=GREEN, bg=PANEL)
+        self.status_dot = tk.Label(pill.body, text="●", font=self.F(10), fg=GREEN, bg=PANEL)
         self.status_dot.pack(side="left", padx=(4, 4), pady=2)
-        self.status_lbl = tk.Label(pill.body, text="Ready", font=self.F(12),
-                                   fg=MUTED, bg=PANEL)
+        self.status_lbl = tk.Label(pill.body, text="Ready", font=self.F(12), fg=MUTED, bg=PANEL)
         self.status_lbl.pack(side="left", padx=(0, 8), pady=2)
 
         self.new_chat_btn = SmoothButton(
@@ -305,7 +292,6 @@ class AgentApp(ctk.CTk):
         self.status_lbl.configure(text=text)
         self.status_dot.configure(fg=color)
 
-    # --------------------------------------------------------- welcome ------
     def _build_welcome(self):
         self.welcome = ctk.CTkFrame(self.center, fg_color="transparent")
         self.welcome.grid(row=0, column=0, sticky="nsew")
@@ -315,8 +301,7 @@ class AgentApp(ctk.CTk):
         inner = ctk.CTkFrame(self.welcome, fg_color="transparent")
         inner.grid(row=0, column=0)
 
-        badge = SmoothFrame(inner, radius=22, fill=ACCENT_SOFT, border=ACCENT,
-                            size=(68, 68))
+        badge = SmoothFrame(inner, radius=22, fill=ACCENT_SOFT, border=ACCENT, size=(68, 68))
         badge.pack(pady=(0, 20))
         tk.Label(badge.body, text="S", font=self.F(30, "bold"), fg=ACCENT,
                  bg=ACCENT_SOFT).pack(expand=True)
@@ -326,9 +311,6 @@ class AgentApp(ctk.CTk):
         ctk.CTkLabel(inner, text="Enter a domain, company, username.",
                      font=self.F(14, "bold"), text_color=TEXT).pack()
 
-
-
-    # --------------------------------------------------------- input dock ---
     def _build_dock(self, parent):
         wrap = ctk.CTkFrame(parent, fg_color="transparent")
         wrap.grid(row=2, column=0, sticky="ew")
@@ -353,7 +335,7 @@ class AgentApp(ctk.CTk):
         self.btn_win = self.dock.create_window(0, 0, window=self.send_btn, anchor="e")
         self.dock.bind("<Configure>", lambda e: self._layout_dock())
 
-        ctk.CTkLabel(wrap, text="Enter to send   ·   Shift+Enter for a new line",
+        ctk.CTkLabel(wrap, text="Enter to send    ·    Shift+Enter for a new line",
                      font=self.F(10), text_color=MUTED).grid(row=1, column=0, pady=(6, 0))
 
         self.entry.bind("<Return>", self._on_enter)
@@ -397,7 +379,7 @@ class AgentApp(ctk.CTk):
 
     def _on_enter(self, _event):
         self.send()
-        return "break"  # don't insert a newline
+        return "break"
 
     def _resize_entry(self, _event=None):
         lines = int(self.entry.index("end-1c").split(".")[0])
@@ -410,7 +392,6 @@ class AgentApp(ctk.CTk):
         else:
             self.send()
 
-    # ------------------------------------------------------- chat feed ------
     def _show_chat(self):
         if self.chat_started:
             return
@@ -465,10 +446,10 @@ class AgentApp(ctk.CTk):
                 self.feed._parent_canvas.yview_moveto(1.0)
             except Exception:
                 pass
+
         if self.chat_started:
             self.after(40, go)
 
-    # ------------------------------------------------------ message blocks --
     def _add_user(self, text):
         holder = ctk.CTkFrame(self.feed, fg_color="transparent")
         holder.grid(row=self._next_row(), column=0, sticky="e", padx=(0, 8), pady=(12, 4))
@@ -547,7 +528,6 @@ class AgentApp(ctk.CTk):
         btn.bind("<Enter>", lambda e: btn.configure(fg=TEXT))
         btn.bind("<Leave>", lambda e: btn.configure(fg=MUTED))
 
-    # ----------------------------------------------------- typing indicator --
     def _show_typing(self):
         if self.typing_row is not None:
             return
@@ -563,7 +543,7 @@ class AgentApp(ctk.CTk):
         if self.typing_row is None:
             return
         frames = ("●  ○  ○", "○  ●  ○", "○  ○  ●", "○  ●  ○")
-        self.typing_lbl.configure(text=f"Working   {frames[self.typing_step % 4]}")
+        self.typing_lbl.configure(text=f"Working    {frames[self.typing_step % 4]}")
         self.typing_step += 1
         self.typing_job = self.after(280, self._typing_tick)
 
@@ -575,7 +555,6 @@ class AgentApp(ctk.CTk):
             self.typing_row.destroy()
             self.typing_row = None
 
-    # ------------------------------------------------------------ actions ---
     def send(self):
         text = self.entry.get("1.0", "end").strip()
         if not text or self.busy:
@@ -602,7 +581,6 @@ class AgentApp(ctk.CTk):
         )
         self.worker.start()
 
-
     def stop(self):
         self.stop_event.set()
         self._set_status("Stopping...", AMBER)
@@ -618,7 +596,6 @@ class AgentApp(ctk.CTk):
             self.new_chat_btn.set_enabled(True)
             self._set_status("Ready", GREEN)
 
-    # ------------------------------------------------------ event polling ---
     def _flush_tokens(self, tokens):
         chunk = "".join(tokens)
         if not chunk:
@@ -647,7 +624,7 @@ class AgentApp(ctk.CTk):
                 if kind in ("thought", "tool"):
                     self._clear_typing()
                     self._add_chip(kind, text)
-                    self.agent_label = None  # next tokens start a new answer block
+                    self.agent_label = None
                     self._show_typing()
                 elif kind == "error":
                     self._clear_typing()
