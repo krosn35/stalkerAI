@@ -9,7 +9,6 @@ def init():
 
 async def scrape_ig_profile(username):
     apify_client = ApifyClientAsync(TOKEN)
-
     actor_client = apify_client.actor("apify/instagram-profile-scraper")
     call_result = await actor_client.call(run_input={
         "usernames": [username],
