@@ -68,7 +68,3 @@ def json_step(notes: str) -> PersonReport:
 def check_candidate(info: str) -> PersonReport:
     notes = search_step(info)
     return json_step(notes)
-
-def check_candidate(info: str) -> PersonReport:
-    notes = search_step(info)
-    return json_step(notes)
