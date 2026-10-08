@@ -1,9 +1,11 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-from tools import PersonReport   # schéma z tool.py
+from tools import PersonReport   # musí odpovídat názvu souboru se schématem
 
 load_dotenv()
 client = genai.Client()
@@ -34,7 +36,7 @@ json_config = types.GenerateContentConfig(
 def search_step(info: str) -> str:
     response = client.models.generate_content(
         model=MODEL,
-        contents=info,
+        contents=info,   # teď se používá to, co zadáš v main.py
         config=search_config,
     )
     text = response.text or ""
@@ -64,4 +66,10 @@ def json_step(notes: str) -> PersonReport:
 
 def check_candidate(info: str) -> PersonReport:
     notes = search_step(info)
-    return json_step(notes)
+    report = json_step(notes)
+
+    out = Path(__file__).parent / "report.json"
+    out.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    print(f"Uloženo do {out}")
+
+    return
