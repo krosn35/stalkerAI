@@ -12,6 +12,9 @@ import queue
 import threading
 import tkinter.font as tkfont
 import customtkinter as ctk
+import tkinter as tk
+from PIL import Image, ImageDraw, ImageTk
+
 
 # Linux: avoid DPI scaling surprises
 ctk.deactivate_automatic_dpi_awareness()
@@ -38,8 +41,128 @@ GREEN = "#34D399"
 AMBER = "#F59E0B"
 RED = "#EF4444"
 
-# Starting points on the welcome screen: (title, subtitle, text put in the input)
-QUICK_PROMPTS = []
+# ------------------------------------------------- SMOOTH (ANTI-ALIASED) ----
+class SmoothFrame(tk.Canvas):
+    """Rounded box with smooth edges.
+
+    Tk draws rounded shapes without anti-aliasing, which looks pixelated on
+    Linux. This box is a Pillow image drawn 4x larger and shrunk down.
+    Put child widgets into `.body`.
+    """
+
+    def __init__(self, master, radius=12, fill=CARD, border=None, bw=1,
+                 bg=BG, size=None):
+        super().__init__(master, bg=bg, highlightthickness=0, bd=0,
+                         width=40, height=30)
+        self.radius = radius
+        self.fill = fill
+        self.border = border
+        self.bw = bw
+        self.fixed = size
+        # a square child must not poke out of the rounded corners
+        self.inset = int(min(radius, 20) * 0.3) + (bw if border else 0) + 1
+        self._photo = None
+        self._key = None
+
+        self.body = tk.Frame(self, bg=fill)
+        self._win = self.create_window(self.inset, self.inset,
+                                       window=self.body, anchor="nw")
+        if size:
+            self.configure(width=size[0], height=size[1])
+            self.itemconfigure(self._win, width=size[0] - 2 * self.inset,
+                               height=size[1] - 2 * self.inset)
+            self.body.pack_propagate(False)
+        else:
+            self.body.bind("<Configure>", lambda e: self._sync())
+        self.bind("<Configure>", lambda e: self._render(e.width, e.height))
+        self.after_idle(self._sync)
+
+    def _sync(self):
+        if self.fixed or not self.winfo_exists():
+            return
+        self.configure(width=self.body.winfo_reqwidth() + 2 * self.inset,
+                       height=self.body.winfo_reqheight() + 2 * self.inset)
+
+    def _render(self, w, h):
+        if w < 6 or h < 6:
+            return
+        key = (w, h, self.fill, self.border)
+        if key == self._key:
+            return
+        self._key = key
+        s = 4
+        r = min(self.radius, w // 2, h // 2)
+        img = Image.new("RGBA", (w * s, h * s), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rounded_rectangle(
+            (0, 0, w * s - 1, h * s - 1), radius=r * s, fill=self.fill,
+            outline=self.border, width=self.bw * s)
+        self._photo = ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))
+        self.delete("bg")
+        self.create_image(0, 0, anchor="nw", image=self._photo, tags="bg")
+        self.tag_lower("bg")
+
+
+class SmoothButton(SmoothFrame):
+    """Clickable SmoothFrame with a text label and hover colour."""
+
+    def __init__(self, master, text, command, fill, hover, fg="white",
+                 font=None, radius=12, border=None, bg=BG, size=None,
+                 padx=10, pady=2):
+        super().__init__(master, radius=radius, fill=fill, border=border,
+                         bg=bg, size=size)
+        self.command = command
+        self.base = fill
+        self.hover = hover
+        self.fg = fg
+        self.enabled = True
+        self.label = tk.Label(self.body, text=text, fg=fg, bg=fill,
+                              font=font, cursor="hand2")
+        if size:
+            self.label.pack(expand=True)
+        else:
+            self.label.pack(padx=padx, pady=pady)
+        for w in (self, self.body, self.label):
+            w.bind("<Enter>", self._on_enter)
+            w.bind("<Leave>", self._on_leave)
+            w.bind("<Button-1>", self._on_click)
+
+    def _paint(self, color):
+        self.fill = color
+        self.body.configure(bg=color)
+        self.label.configure(bg=color)
+        self._render(self.winfo_width(), self.winfo_height())
+
+    def _on_enter(self, _e):
+        if self.enabled:
+            self._paint(self.hover)
+
+    def _on_leave(self, _e):
+        try:
+            under = self.winfo_containing(*self.winfo_pointerxy())
+        except Exception:
+            under = None
+        if under in (self, self.body, self.label):
+            return
+        self._paint(self.base)
+
+    def _on_click(self, _e):
+        if self.enabled and self.command:
+            self.command()
+
+    def restyle(self, text=None, fill=None, hover=None):
+        if text is not None:
+            self.label.configure(text=text)
+        if hover is not None:
+            self.hover = hover
+        if fill is not None:
+            self.base = fill
+            self._paint(fill)
+
+    def set_enabled(self, enabled):
+        self.enabled = enabled
+        self.label.configure(fg=self.fg if enabled else MUTED,
+                             cursor="hand2" if enabled else "arrow")
+        self._paint(self.base)
 
 
 # ---------------------------------------------------------------- AGENT ----
@@ -150,11 +273,10 @@ class AgentApp(ctk.CTk):
         bar.grid(row=0, column=0, sticky="ew")
         bar.grid_columnconfigure(1, weight=1)
 
-        logo = ctk.CTkFrame(bar, width=36, height=36, corner_radius=11, fg_color=ACCENT)
+        logo = SmoothFrame(bar, radius=11, fill=ACCENT, size=(36, 36))
         logo.grid(row=0, column=0)
-        logo.pack_propagate(False)
-        ctk.CTkLabel(logo, text="S", font=self.F(17, "bold"),
-                     text_color="white").pack(expand=True)
+        tk.Label(logo.body, text="S", font=self.F(17, "bold"), fg="white",
+                 bg=ACCENT).pack(expand=True)
 
         title = ctk.CTkFrame(bar, fg_color="transparent")
         title.grid(row=0, column=1, sticky="w", padx=(12, 0))
@@ -164,24 +286,24 @@ class AgentApp(ctk.CTk):
         right = ctk.CTkFrame(bar, fg_color="transparent")
         right.grid(row=0, column=2, sticky="e")
 
-        pill = ctk.CTkFrame(right, corner_radius=16, fg_color=PANEL,
-                            border_width=1, border_color=BORDER)
+        pill = SmoothFrame(right, radius=16, fill=PANEL, border=BORDER)
         pill.pack(side="left", padx=(0, 10))
-        self.status_dot = ctk.CTkLabel(pill, text="●", font=self.F(10), text_color=GREEN)
-        self.status_dot.pack(side="left", padx=(12, 4), pady=6)
-        self.status_lbl = ctk.CTkLabel(pill, text="Ready", font=self.F(12), text_color=MUTED)
-        self.status_lbl.pack(side="left", padx=(0, 14))
+        self.status_dot = tk.Label(pill.body, text="●", font=self.F(10),
+                                   fg=GREEN, bg=PANEL)
+        self.status_dot.pack(side="left", padx=(4, 4), pady=2)
+        self.status_lbl = tk.Label(pill.body, text="Ready", font=self.F(12),
+                                   fg=MUTED, bg=PANEL)
+        self.status_lbl.pack(side="left", padx=(0, 8), pady=2)
 
-        self.new_chat_btn = ctk.CTkButton(
-            right, text="+  New chat", height=34, corner_radius=17,
-            fg_color=PANEL, hover_color=CARD_HOVER, border_width=1,
-            border_color=BORDER, text_color=TEXT, font=self.F(12, "bold"),
-            command=self._reset_chat)
+        self.new_chat_btn = SmoothButton(
+            right, text="+  New chat", command=self._reset_chat, radius=17,
+            fill=PANEL, hover=CARD_HOVER, border=BORDER, fg=TEXT,
+            font=self.F(12, "bold"), padx=10, pady=2)
         self.new_chat_btn.pack(side="left")
 
     def _set_status(self, text, color):
         self.status_lbl.configure(text=text)
-        self.status_dot.configure(text_color=color)
+        self.status_dot.configure(fg=color)
 
     # --------------------------------------------------------- welcome ------
     def _build_welcome(self):
@@ -193,12 +315,11 @@ class AgentApp(ctk.CTk):
         inner = ctk.CTkFrame(self.welcome, fg_color="transparent")
         inner.grid(row=0, column=0)
 
-        badge = ctk.CTkFrame(inner, width=68, height=68, corner_radius=22,
-                             fg_color=ACCENT_SOFT, border_width=1, border_color=ACCENT)
+        badge = SmoothFrame(inner, radius=22, fill=ACCENT_SOFT, border=ACCENT,
+                            size=(68, 68))
         badge.pack(pady=(0, 20))
-        badge.pack_propagate(False)
-        ctk.CTkLabel(badge, text="S", font=self.F(30, "bold"),
-                     text_color=ACCENT).pack(expand=True)
+        tk.Label(badge.body, text="S", font=self.F(30, "bold"), fg=ACCENT,
+                 bg=ACCENT_SOFT).pack(expand=True)
 
         ctk.CTkLabel(inner, text="Who are we investigating?",
                      font=self.F(28, "bold"), text_color=TEXT).pack()
@@ -206,40 +327,6 @@ class AgentApp(ctk.CTk):
                      font=self.F(14, "bold"), text_color=TEXT).pack()
 
 
-        grid = ctk.CTkFrame(inner, fg_color="transparent")
-        grid.pack()
-        for i, (title, sub, prompt) in enumerate(QUICK_PROMPTS):
-            self._quick_card(grid, title, sub, prompt).grid(
-                row=i // 2, column=i % 2, padx=7, pady=7)
-
-    def _quick_card(self, parent, title, sub, prompt):
-        card = ctk.CTkFrame(parent, width=300, height=84, corner_radius=14,
-                            fg_color=CARD, border_width=1, border_color=BORDER)
-        card.pack_propagate(False)
-        t = ctk.CTkLabel(card, text=title, font=self.F(13, "bold"),
-                         text_color=TEXT, anchor="w")
-        t.pack(anchor="w", padx=16, pady=(16, 2))
-        s = ctk.CTkLabel(card, text=sub, font=self.F(11), text_color=MUTED,
-                         anchor="w", justify="left", wraplength=268)
-        s.pack(anchor="w", padx=16)
-
-        def enter(_e):
-            card.configure(fg_color=CARD_HOVER, border_color=ACCENT)
-
-        def leave(_e):
-            card.configure(fg_color=CARD, border_color=BORDER)
-
-        for w in (card, t, s):
-            w.bind("<Enter>", enter)
-            w.bind("<Leave>", leave)
-            w.bind("<Button-1>", lambda _e, p=prompt: self._use_prompt(p))
-        return card
-
-    def _use_prompt(self, prompt):
-        self.entry.delete("1.0", "end")
-        self.entry.insert("1.0", prompt)
-        self._resize_entry()
-        self.entry.focus_set()
 
     # --------------------------------------------------------- input dock ---
     def _build_dock(self, parent):
@@ -247,32 +334,66 @@ class AgentApp(ctk.CTk):
         wrap.grid(row=2, column=0, sticky="ew")
         wrap.grid_columnconfigure(0, weight=1)
 
-        self.dock = ctk.CTkFrame(wrap, corner_radius=24, fg_color=CARD,
-                                 border_width=1, border_color=BORDER)
+        self.dock_border = BORDER
+        self.dock_photo = None
+        self._dock_key = None
+        self.dock = tk.Canvas(wrap, bg=BG, highlightthickness=0, bd=0, height=60)
         self.dock.grid(row=0, column=0, sticky="ew")
-        self.dock.grid_columnconfigure(0, weight=1)
 
         self.entry = ctk.CTkTextbox(
-            self.dock, height=44, fg_color="transparent", border_width=0,
-            font=self.F(14), text_color=TEXT, wrap="word",
+            self.dock, height=44, fg_color=CARD, bg_color=CARD, corner_radius=0,
+            border_width=0, font=self.F(14), text_color=TEXT, wrap="word",
             activate_scrollbars=False)
-        self.entry.grid(row=0, column=0, sticky="ew", padx=(18, 6), pady=8)
+        self.send_btn = SmoothButton(
+            self.dock, text="↑", command=self._on_action, radius=12,
+            fill=ACCENT, hover=ACCENT_HOVER, font=self.F(18, "bold"),
+            bg=CARD, size=(40, 40))
 
-        self.send_btn = ctk.CTkButton(
-            self.dock, text="↑", width=42, height=42, corner_radius=21,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            font=self.F(18, "bold"), command=self._on_action)
-        self.send_btn.grid(row=0, column=1, padx=(0, 10), pady=8, sticky="s")
+        self.entry_win = self.dock.create_window(0, 0, window=self.entry, anchor="w")
+        self.btn_win = self.dock.create_window(0, 0, window=self.send_btn, anchor="e")
+        self.dock.bind("<Configure>", lambda e: self._layout_dock())
 
         ctk.CTkLabel(wrap, text="Enter to send   ·   Shift+Enter for a new line",
                      font=self.F(10), text_color=MUTED).grid(row=1, column=0, pady=(6, 0))
 
         self.entry.bind("<Return>", self._on_enter)
-        self.entry.bind("<Shift-Return>", lambda e: None)  # keep default: newline
+        self.entry.bind("<Shift-Return>", lambda e: None)
         self.entry.bind("<KeyRelease>", self._resize_entry)
-        self.entry.bind("<FocusIn>", lambda e: self.dock.configure(border_color=ACCENT))
-        self.entry.bind("<FocusOut>", lambda e: self.dock.configure(border_color=BORDER))
+        self.entry.bind("<FocusIn>", lambda e: self._set_dock_border(ACCENT))
+        self.entry.bind("<FocusOut>", lambda e: self._set_dock_border(BORDER))
         self.entry.focus_set()
+
+    def _set_dock_border(self, color):
+        self.dock_border = color
+        self._layout_dock()
+
+    def _layout_dock(self):
+        w = self.dock.winfo_width()
+        if w < 100:
+            return
+        entry_h = int(self.entry.cget("height"))
+        h = max(60, entry_h + 16)
+        self.dock.configure(height=h)
+        self.dock.coords(self.entry_win, 18, h // 2)
+        self.dock.itemconfigure(self.entry_win, width=w - 18 - 66, height=entry_h)
+        self.dock.coords(self.btn_win, w - 12, h - 30)
+
+        key = (w, h, self.dock_border)
+        if key != self._dock_key:
+            self._dock_key = key
+            self._render_dock_bg(w, h)
+
+    def _render_dock_bg(self, w, h):
+        scale = 4
+        img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rounded_rectangle(
+            (0, 0, w * scale - 1, h * scale - 1), radius=16 * scale,
+            fill=CARD, outline=self.dock_border, width=scale)
+        img = img.resize((w, h), Image.LANCZOS)
+        self.dock_photo = ImageTk.PhotoImage(img)
+        self.dock.delete("bg")
+        self.dock.create_image(0, 0, anchor="nw", image=self.dock_photo, tags="bg")
+        self.dock.tag_lower("bg")
 
     def _on_enter(self, _event):
         self.send()
@@ -281,6 +402,7 @@ class AgentApp(ctk.CTk):
     def _resize_entry(self, _event=None):
         lines = int(self.entry.index("end-1c").split(".")[0])
         self.entry.configure(height=min(140, 24 + lines * 20))
+        self._layout_dock()
 
     def _on_action(self):
         if self.busy:
@@ -350,23 +472,21 @@ class AgentApp(ctk.CTk):
     def _add_user(self, text):
         holder = ctk.CTkFrame(self.feed, fg_color="transparent")
         holder.grid(row=self._next_row(), column=0, sticky="e", padx=(0, 8), pady=(12, 4))
-        bubble = ctk.CTkFrame(holder, corner_radius=18, fg_color=ACCENT_SOFT,
-                              border_width=1, border_color=ACCENT)
+        bubble = SmoothFrame(holder, radius=18, fill=ACCENT_SOFT, border=ACCENT)
         bubble.pack()
-        lbl = ctk.CTkLabel(bubble, text=text, font=self.F(13), text_color=TEXT,
+        lbl = ctk.CTkLabel(bubble.body, text=text, font=self.F(13), text_color=TEXT,
                            justify="left", anchor="w", wraplength=self._wrap("user"))
-        lbl.pack(padx=16, pady=10)
+        lbl.pack(padx=8, pady=4)
         self._track(lbl, "user")
 
     def _add_agent(self):
         row = ctk.CTkFrame(self.feed, fg_color="transparent")
         row.grid(row=self._next_row(), column=0, sticky="w", padx=(0, 8), pady=(8, 4))
 
-        avatar = ctk.CTkFrame(row, width=30, height=30, corner_radius=10, fg_color=ACCENT)
+        avatar = SmoothFrame(row, radius=10, fill=ACCENT, size=(30, 30))
         avatar.pack(side="left", anchor="n", padx=(0, 12))
-        avatar.pack_propagate(False)
-        ctk.CTkLabel(avatar, text="S", font=self.F(13, "bold"),
-                     text_color="white").pack(expand=True)
+        tk.Label(avatar.body, text="S", font=self.F(13, "bold"), fg="white",
+                 bg=ACCENT).pack(expand=True)
 
         body = ctk.CTkFrame(row, fg_color="transparent")
         body.pack(side="left", anchor="n")
@@ -385,30 +505,28 @@ class AgentApp(ctk.CTk):
 
         holder = ctk.CTkFrame(self.feed, fg_color="transparent")
         holder.grid(row=self._next_row(), column=0, sticky="w", padx=(42, 8), pady=3)
-        chip = ctk.CTkFrame(holder, corner_radius=10, fg_color=PANEL,
-                            border_width=1, border_color=BORDER)
+        chip = SmoothFrame(holder, radius=12, fill=PANEL, border=BORDER)
         chip.pack()
-        ctk.CTkLabel(chip, text="●", font=self.F(9), text_color=color).pack(
-            side="left", padx=(10, 6), pady=6)
-        ctk.CTkLabel(chip, text=name, font=self.F(10, "bold"),
+        ctk.CTkLabel(chip.body, text="●", font=self.F(9), text_color=color).pack(
+            side="left", padx=(4, 6), pady=2)
+        ctk.CTkLabel(chip.body, text=name, font=self.F(10, "bold"),
                      text_color=color).pack(side="left")
-        lbl = ctk.CTkLabel(chip, text=text, font=self.F(11, mono=(kind == "tool")),
+        lbl = ctk.CTkLabel(chip.body, text=text, font=self.F(11, mono=(kind == "tool")),
                            text_color=MUTED, justify="left", anchor="w",
                            wraplength=self._wrap("chip"))
-        lbl.pack(side="left", padx=(8, 12), pady=6)
+        lbl.pack(side="left", padx=(8, 6), pady=2)
         self._track(lbl, "chip")
 
     def _add_error(self, text):
         holder = ctk.CTkFrame(self.feed, fg_color="transparent")
         holder.grid(row=self._next_row(), column=0, sticky="w", padx=(42, 8), pady=6)
-        card = ctk.CTkFrame(holder, corner_radius=12, fg_color="#2A1215",
-                            border_width=1, border_color=RED)
+        card = SmoothFrame(holder, radius=14, fill="#2A1215", border=RED)
         card.pack()
-        ctk.CTkLabel(card, text="Something went wrong", font=self.F(12, "bold"),
-                     text_color=RED).pack(anchor="w", padx=14, pady=(10, 2))
-        lbl = ctk.CTkLabel(card, text=text, font=self.F(11), text_color=MUTED,
+        ctk.CTkLabel(card.body, text="Something went wrong", font=self.F(12, "bold"),
+                     text_color=RED).pack(anchor="w", padx=6, pady=(4, 2))
+        lbl = ctk.CTkLabel(card.body, text=text, font=self.F(11), text_color=MUTED,
                            justify="left", anchor="w", wraplength=self._wrap("agent"))
-        lbl.pack(anchor="w", padx=14, pady=(0, 10))
+        lbl.pack(anchor="w", padx=6, pady=(0, 4))
         self._track(lbl, "agent")
 
     def _add_copy_button(self):
@@ -422,11 +540,12 @@ class AgentApp(ctk.CTk):
             btn.configure(text="Copied")
             self.after(1200, lambda: btn.winfo_exists() and btn.configure(text="Copy"))
 
-        btn = ctk.CTkButton(self.agent_body, text="Copy", width=54, height=24,
-                            corner_radius=8, fg_color="transparent",
-                            hover_color=CARD_HOVER, text_color=MUTED,
-                            font=self.F(11), command=copy)
+        btn = tk.Label(self.agent_body, text="Copy", fg=MUTED, bg=BG,
+                       font=self.F(11), cursor="hand2")
         btn.pack(anchor="w", pady=(2, 0))
+        btn.bind("<Button-1>", lambda e: copy())
+        btn.bind("<Enter>", lambda e: btn.configure(fg=TEXT))
+        btn.bind("<Leave>", lambda e: btn.configure(fg=MUTED))
 
     # ----------------------------------------------------- typing indicator --
     def _show_typing(self):
@@ -483,6 +602,7 @@ class AgentApp(ctk.CTk):
         )
         self.worker.start()
 
+
     def stop(self):
         self.stop_event.set()
         self._set_status("Stopping...", AMBER)
@@ -490,12 +610,12 @@ class AgentApp(ctk.CTk):
     def _set_busy(self, busy):
         self.busy = busy
         if busy:
-            self.send_btn.configure(text="■", fg_color=RED, hover_color="#B91C1C")
-            self.new_chat_btn.configure(state="disabled")
+            self.send_btn.restyle(text="■", fill=RED, hover="#B91C1C")
+            self.new_chat_btn.set_enabled(False)
             self._set_status("Working", AMBER)
         else:
-            self.send_btn.configure(text="↑", fg_color=ACCENT, hover_color=ACCENT_HOVER)
-            self.new_chat_btn.configure(state="normal")
+            self.send_btn.restyle(text="↑", fill=ACCENT, hover=ACCENT_HOVER)
+            self.new_chat_btn.set_enabled(True)
             self._set_status("Ready", GREEN)
 
     # ------------------------------------------------------ event polling ---
