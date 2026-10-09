@@ -16,7 +16,7 @@ BORDER_PURPLE = "#8B5CF6" # Accent highlight
 TEXT_MUTED = "#8E8F9A"    # Muted labels
 
 CARD_PAD = 20   # horizontal padding inside every card
-FIELD_W = 400   # width of entries / results box / json box
+FIELD_W = 380   # width of entries / results box
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -42,7 +42,7 @@ PROFILE_FIELDS = [
 
 
 def split_name(full_name: str) -> tuple[str, str]:
-    """'Jan  Novák Svoboda' -> ('Jan', 'Novák Svoboda').
+    """'Jan Novák Svoboda' -> ('Jan', 'Novák Svoboda').
 
     split() without arguments handles any number of spaces/tabs and
     ignores leading/trailing whitespace, so extra spaces are never a problem.
@@ -66,11 +66,17 @@ class App(ctk.CTk):
         self.bind("<Return>", lambda e: self.save_profile())
         self.bind("<KP_Enter>", lambda e: self.save_profile())
 
-        # Cards are stacked with pack() inside this single column, so Tk
-        # can size the window to exactly fit them -> no manual y/height math.
-        self._build_card()
-        self._build_platform_card()
-        self._build_json_card()
+        # Main grid container
+        self.container = ctk.CTkFrame(self, fg_color="transparent")
+        self.container.pack(padx=16, pady=16, fill="both", expand=True)
+
+        # Top row: Input card (left) and Results card (right)
+        self._build_card(self.container, row=0, col=0)
+        self._build_platform_card(self.container, row=0, col=1)
+
+        # Bottom row: Output JSON card spanning both columns
+        self._build_json_card(self.container, row=1, col=0, colspan=2)
+
         self._autosize()
 
     def _autosize(self):
@@ -81,20 +87,20 @@ class App(ctk.CTk):
         self.geometry(f"{w}x{h}")
         self.minsize(w, h)
 
-    def _build_card(self):
+    def _build_card(self, parent, row, col):
         card = ctk.CTkFrame(
-            self, fg_color=CARD_BG, corner_radius=20,
+            parent, fg_color=CARD_BG, corner_radius=20,
             border_width=1, border_color=BORDER_PURPLE
         )
-        card.pack(pady=(24, 12))  # pack centers it horizontally by default
+        card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
 
         # INPUT CARD HEADING
         ctk.CTkLabel(
             card, text="🤖 StalkerAI", font=ctk.CTkFont(size=22, weight="bold")
-        ).pack(padx=CARD_PAD, pady=(12, 2))
+        ).pack(padx=CARD_PAD, pady=(16, 2))
         ctk.CTkLabel(
             card, text="Profil", font=ctk.CTkFont(size=13), text_color=TEXT_MUTED
-        ).pack(pady=(0, 8))
+        ).pack(pady=(0, 12))
 
         # INPUT CARD
         for field, placeholder in PROFILE_FIELDS:
@@ -109,7 +115,7 @@ class App(ctk.CTk):
                 border_color="#2A2B36",
                 font=ctk.CTkFont(size=14),
             )
-            entry.pack(padx=CARD_PAD, pady=3)
+            entry.pack(padx=CARD_PAD, pady=4)
             self.profile_entries[field] = entry
 
         # SPACE BETWEEN INPUT AND SAVE BUTTON
@@ -166,12 +172,12 @@ class App(ctk.CTk):
         self.status_var.set("")
         self.focus()
 
-    def _build_platform_card(self):
+    def _build_platform_card(self, parent, row, col):
         self.results_card = ctk.CTkFrame(
-            self, fg_color=CARD_BG, corner_radius=20,
+            parent, fg_color=CARD_BG, corner_radius=20,
             border_width=1, border_color=BORDER_PURPLE
         )
-        self.results_card.pack(pady=12)
+        self.results_card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
 
         ctk.CTkLabel(
             self.results_card, text="Found profiles",
@@ -179,10 +185,10 @@ class App(ctk.CTk):
         ).pack(padx=CARD_PAD, pady=(16, 8))
 
         self.results_box = ctk.CTkScrollableFrame(
-            self.results_card, width=FIELD_W, height=250,
+            self.results_card, width=FIELD_W, height=180,
             fg_color="#20212B", corner_radius=10
         )
-        self.results_box.pack(padx=CARD_PAD, pady=(0, 20))
+        self.results_box.pack(padx=CARD_PAD, pady=(0, 16))
 
         self.no_results_lbl = ctk.CTkLabel(
             self.results_box, text="No search yet", text_color=TEXT_MUTED
@@ -271,12 +277,12 @@ class App(ctk.CTk):
                 seen.append(p)
         self.overview_lbl.configure(text=" · ".join(seen))
 
-    def _build_json_card(self):
+    def _build_json_card(self, parent, row, col, colspan=1):
         self.json_card = ctk.CTkFrame(
-            self, fg_color=CARD_BG, corner_radius=20,
+            parent, fg_color=CARD_BG, corner_radius=20,
             border_width=1, border_color=BORDER_PURPLE
         )
-        self.json_card.pack(pady=(12, 24))
+        self.json_card.grid(row=row, column=col, columnspan=colspan, padx=8, pady=8, sticky="nsew")
 
         header = ctk.CTkFrame(self.json_card, fg_color="transparent")
         header.pack(padx=CARD_PAD, pady=(16, 8), fill="x")
@@ -292,12 +298,13 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=12), command=self._save_json
         ).grid(row=0, column=1, sticky="e")
 
+        # Increased height from 180 -> 320 to make output vertically larger
         self.json_box = ctk.CTkTextbox(
-            self.json_card, width=FIELD_W, height=200,
+            self.json_card, height=520,
             fg_color="#20212B", corner_radius=10,
             font=ctk.CTkFont(size=12, family="monospace")
         )
-        self.json_box.pack(padx=CARD_PAD, pady=(0, 20))
+        self.json_box.pack(padx=CARD_PAD, pady=(0, 20), fill="x", expand=True)
         self.json_box.insert("1.0", "{}")
         self.json_box.configure(state="disabled")
 
