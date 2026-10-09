@@ -36,18 +36,6 @@ PROFILE_FIELDS = [
 ]
 
 
-def split_name(full_name: str) -> tuple[str, str]:
-    """'Jan  Novák Svoboda' -> ('Jan', 'Novák Svoboda').
-
-    split() without arguments handles any number of spaces/tabs and
-    ignores leading/trailing whitespace, so extra spaces are never a problem.
-    """
-    parts = full_name.split()
-    if not parts:
-        return "", ""
-    return parts[0], " ".join(parts[1:])
-
-
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
