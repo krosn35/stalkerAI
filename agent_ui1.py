@@ -128,6 +128,7 @@ class App(ctk.CTk):
         print(self.profile.to_dict())
         self.status_var.set("Profile saved")
         print(asyncio.run(api.search_linkedin_accounts(self.profile.to_dict()["name"])))
+        print(asyncio.run(api.search_instagram_accounts(self.profile.to_dict()["name"])))
 
     def clear_profile(self):
         for entry in self.profile_entries.values():
