@@ -1,9 +1,64 @@
 import os
+from collections.abc import Mapping
 import unicodedata
 from difflib import SequenceMatcher
 from apify_client import ApifyClientAsync
 
 TOKEN = None
+
+def _run_dataset_id(run, platform: str) -> str:
+    """Support both dictionary responses and typed Apify Run responses."""
+    if isinstance(run, Mapping):
+        status = run.get("status")
+        dataset_id = run.get("defaultDatasetId")
+    else:
+        status = getattr(run, "status", None)
+        dataset_id = getattr(run, "default_dataset_id", None)
+    status = getattr(status, "value", status)
+    if status != "SUCCEEDED":
+        raise RuntimeError(f"{platform} actor did not complete successfully (status={status})")
+    if not dataset_id:
+        raise RuntimeError(f"{platform} actor returned no dataset ID")
+    return dataset_id
+
+
+def _profile_fields(profile) -> dict[str, str]:
+    # Keep legacy name-only callers working, but accept the full form object.
+    if isinstance(profile, str):
+        profile = {"name": profile}
+    fields = {}
+    for field in ("name", "school", "city"):
+        value = profile.get(field, "") if isinstance(profile, Mapping) else getattr(profile, field, "")
+        if value is None and field != "name":
+            value = ""
+        if not isinstance(value, str):
+            raise TypeError(f"{field} must be a string")
+        fields[field] = value.strip()
+    if not _normalize_name(fields["name"]):
+        raise ValueError("name must contain letters or numbers")
+    return fields
+
+
+def _context_match_score(fields: dict[str, str], candidate: dict) -> float:
+    def text(value):
+        if isinstance(value, Mapping):
+            return " ".join(text(item) for item in value.values())
+        if isinstance(value, (list, tuple)):
+            return " ".join(text(item) for item in value)
+        return value if isinstance(value, str) else ""
+
+    evidence = _normalize_name(text(candidate))
+    scores = []
+    for field in ("school", "city"):
+        query = _normalize_name(fields[field])
+        field_evidence = evidence
+        if field == "city":
+            query = " ".join("prague" if token == "praha" else token for token in query.split())
+            field_evidence = " ".join("prague" if token == "praha" else token for token in evidence.split())
+        if query:
+            query_tokens = set(query.split())
+            scores.append(len(query_tokens & set(field_evidence.split())) / len(query_tokens))
+    return sum(scores) / len(scores) if scores else 0.0
 
 def init():
     global TOKEN
