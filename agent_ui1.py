@@ -21,7 +21,6 @@ ctk.set_default_color_theme("blue")
 class PersonProfile:
     """Output object produced by the form."""
     name: str = ""
-    surname: str = ""
     school: str = ""
     city: str = ""
 
@@ -115,10 +114,8 @@ class App(ctk.CTk):
     def get_profile(self) -> PersonProfile:
         """Read the form and return it as a PersonProfile object."""
         values = {k: e.get().strip() for k, e in self.profile_entries.items()}
-        name, surname = split_name(values["name"])
         return PersonProfile(
-            name=name,
-            surname=surname,
+            name=values["name"],
             school=values["school"],
             city=values["city"],
         )
