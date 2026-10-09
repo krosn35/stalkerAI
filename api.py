@@ -112,12 +112,12 @@ async def search_linkedin_accounts(name: str, max_results: int = 10) -> list[dic
             "maxItems": max_results,
         }
     )
-    if call_result is None or call_result.get("status") != "SUCCEEDED":
-        raise RuntimeError("LinkedIn search actor did not complete successfully")
+    # if call_result is None or call_result.get("status") != "SUCCEEDED":
+    #     raise RuntimeError("LinkedIn search actor did not complete successfully")
 
     accounts = []
     seen_urls = set()
-    dataset = apify_client.dataset(call_result["defaultDatasetId"])
+    dataset = apify_client.dataset(call_result.default_dataset_id)
     async for profile in dataset.iterate_items():
         url = profile.get("linkedinUrl")
         if not url or url in seen_urls:
@@ -180,12 +180,12 @@ async def search_instagram_accounts(name: str, max_results: int = 10) -> list[di
             "enhanceUserSearchWithFacebookPage": False,
         }
     )
-    if call_result is None or call_result.get("status") != "SUCCEEDED":
-        raise RuntimeError("Instagram search actor did not complete successfully")
+    # if call_result is None or call_result.get("status") != "SUCCEEDED":
+    #     raise RuntimeError("Instagram search actor did not complete successfully")
 
     accounts = []
     seen_urls = set()
-    dataset = apify_client.dataset(call_result["defaultDatasetId"])
+    dataset = apify_client.dataset(call_result.default_dataset_id)
     async for profile in dataset.iterate_items():
         username = (profile.get("username") or "").strip().lstrip("@")
         url = f"https://www.instagram.com/{username}/" if username else profile.get("url")
@@ -261,6 +261,6 @@ if __name__ == "__main__":
     load_dotenv()
     init()
 
-    result = asyncio.run(search_instagram_accounts(name="Marek Hroz", max_results=10))
+    result = asyncio.run(search_linkedin_accounts(name="Pavel Vrana", max_results=10))
 
     print(result)
