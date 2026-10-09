@@ -8,17 +8,15 @@ from apify_client import ApifyClientAsync
 
 TOKEN = None
 
-def _run_dataset_id(run, platform: str) -> str:
-    """Support both dictionary responses and typed Apify Run responses."""
-    if isinstance(run, Mapping):
-        status = run.get("status")
-        dataset_id = run.get("defaultDatasetId")
-    else:
-        status = getattr(run, "status", None)
-        dataset_id = getattr(run, "default_dataset_id", None)
+def _run_dataset_id(call_result, platform: str) -> str:
+    """Read the dataset ID from the typed Apify Run response."""
+    if call_result is None:
+        raise RuntimeError(f"{platform} actor returned no run")
+    status = call_result.status
     status = getattr(status, "value", status)
     if status != "SUCCEEDED":
         raise RuntimeError(f"{platform} actor did not complete successfully (status={status})")
+    dataset_id = call_result.default_dataset_id
     if not dataset_id:
         raise RuntimeError(f"{platform} actor returned no dataset ID")
     return dataset_id
@@ -280,7 +278,55 @@ async def search_instagram_accounts(name, max_results: int = 10, *, city: str | 
     return list(filter(lambda x: x["name"] != "", accounts[:max_results]))
 
 
-async def scrape_ig_profile(username):
+def _select_fields(value, schema):
+    """Recursively allowlist fields so nested media/metadata cannot leak through."""
+    if isinstance(value, list):
+        return [selected for item in value
+                if (selected := _select_fields(item, schema)) not in (None, {}, [])]
+    if not isinstance(value, Mapping):
+        return value if isinstance(value, (str, int, float, bool)) else None
+    if schema is None:
+        return None
+    result = {}
+    for key, nested in schema.items():
+        selected = _select_fields(value.get(key), nested)
+        if selected is not None and selected != "" and selected != [] and selected != {}:
+            result[key] = selected
+    return result
+
+
+def _fields(*names):
+    return dict.fromkeys(names)
+
+
+_DATE_FIELDS = _fields("text", "year", "month", "day")
+_LINKEDIN_FIELDS = {
+    **_fields("linkedinUrl", "firstName", "lastName", "name", "headline", "about"),
+    "location": _fields("linkedinText", "city", "state", "country"),
+    "experience": {
+        **_fields("position", "title", "companyName", "companyLinkedinUrl",
+                  "description", "location", "duration"),
+        "startDate": _DATE_FIELDS, "endDate": _DATE_FIELDS,
+    },
+    "education": {
+        **_fields("schoolName", "schoolLinkedinUrl", "degree", "fieldOfStudy", "period"),
+        "startDate": _DATE_FIELDS, "endDate": _DATE_FIELDS,
+    },
+    "skills": _fields("name"),
+    "certifications": _fields("title", "issuedBy", "issuedAt", "link"),
+}
+_INSTAGRAM_FIELDS = _fields(
+    "username", "fullName", "url", "biography", "externalUrl",
+    "followersCount", "followsCount", "postsCount", "isPrivate", "verified",
+    "isBusinessAccount", "businessCategoryName",
+)
+
+
+async def scrape_ig_profile(username, *, raw: bool = False):
+    """Return compact profile facts; raw=True opts into the full actor payload.
+
+    Posts, comments, related profiles and image/video metadata are omitted.
+    """
     apify_client = ApifyClientAsync(TOKEN)
 
     actor_client = apify_client.actor("apify/instagram-profile-scraper")
@@ -292,14 +338,20 @@ async def scrape_ig_profile(username):
     if call_result is None:
         return None
 
-    dataset_client = apify_client.dataset(call_result["defaultDatasetId"])
-    list_items_result = await dataset_client.list_items()
+    dataset_client = apify_client.dataset(_run_dataset_id(call_result, "Profile scraper"))
+    list_items_result = await dataset_client.list_items(limit=1)
 
+    if not list_items_result.items:
+        return None
     profile = list_items_result.items[0]
 
-    return profile
+    return profile if raw else _select_fields(profile, _INSTAGRAM_FIELDS)
 
-async def scrape_linkedin_profile(url):
+async def scrape_linkedin_profile(url, *, raw: bool = False):
+    """Return identity, career, education, skills and certifications.
+
+    Media and actor metadata are omitted; raw=True returns the original payload.
+    """
     apify_client = ApifyClientAsync(TOKEN)
 
     actor_client = apify_client.actor("harvestapi/linkedin-profile-scraper")
@@ -311,12 +363,14 @@ async def scrape_linkedin_profile(url):
     if call_result is None:
         return None
 
-    dataset_client = apify_client.dataset(call_result["defaultDatasetId"])
-    list_items_result = await dataset_client.list_items()
+    dataset_client = apify_client.dataset(_run_dataset_id(call_result, "Profile scraper"))
+    list_items_result = await dataset_client.list_items(limit=1)
 
+    if not list_items_result.items:
+        return None
     profile = list_items_result.items[0]
 
-    return profile
+    return profile if raw else _select_fields(profile, _LINKEDIN_FIELDS)
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
@@ -325,6 +379,7 @@ if __name__ == "__main__":
     load_dotenv()
     init()
 
-    result = asyncio.run(search_instagram_accounts({ "name": "Radko Sablik", "city": "Prague", "school": "Smichovska Stredni" }, max_results=10))
+    # result = asyncio.run(search_instagram_accounts({ "name": "Radko Sablik", "city": "Prague", "school": "Smichovska Stredni" }, max_results=10))
+    result = asyncio.run(scrape_linkedin_profile("https://www.linkedin.com/in/radko-sablik/?isSelfProfile=false"))
 
     print(result)
