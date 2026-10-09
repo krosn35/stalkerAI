@@ -1,9 +1,10 @@
-"""CustomTkinter profile form centered in the window.
+"""CustomTkinter profile form, auto-sized to fit its content.
 
 Fields (name, school, city) -> PersonProfile object.
 The single "Name" field is split on whitespace: first word -> name, the rest -> surname.
 """
 import os
+import json
 from dataclasses import dataclass, asdict
 import asyncio
 import api
@@ -13,6 +14,9 @@ BG_DARK = "#0D0E12"       # Window background
 CARD_BG = "#1A1B23"       # Card background
 BORDER_PURPLE = "#8B5CF6" # Accent highlight
 TEXT_MUTED = "#8E8F9A"    # Muted labels
+
+CARD_PAD = 20   # horizontal padding inside every card
+FIELD_W = 400   # width of entries / results box / json box
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -53,87 +57,69 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("StalkerAI")
-        self.geometry("700x640")
-        self.minsize(480, 560)
         self.configure(fg_color=BG_DARK)
 
         self.profile = PersonProfile()
         self.profile_entries = {}
+        self._last_json = None
 
-        # A single cell with weight=1 and no sticky -> the card stays centered
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
         self.bind("<Return>", lambda e: self.save_profile())
         self.bind("<KP_Enter>", lambda e: self.save_profile())
+
+        # Cards are stacked with pack() inside this single column, so Tk
+        # can size the window to exactly fit them -> no manual y/height math.
         self._build_card()
         self._build_platform_card()
+        self._build_json_card()
+        self._autosize()
+
+    def _autosize(self):
+        """Shrink/grow the window to exactly fit everything packed into it."""
+        self.update_idletasks()
+        w = self.winfo_reqwidth()
+        h = self.winfo_reqheight()
+        self.geometry(f"{w}x{h}")
+        self.minsize(w, h)
 
     def _build_card(self):
         card = ctk.CTkFrame(
             self, fg_color=CARD_BG, corner_radius=20,
             border_width=1, border_color=BORDER_PURPLE
         )
-        card.place(relx=0.5, y=40, anchor="n")
+        card.pack(pady=(24, 12))  # pack centers it horizontally by default
 
-        def _build_platform_card(self):
-            card = ctk.CTkFrame(
-                self, fg_color=CARD_BG, corner_radius=20,
-                border_width=1, border_color=BORDER_PURPLE
-            )
-            card.place(relx=0.5, y=420, anchor="n")
-
-            ctk.CTkLabel(
-                card, text="Search on", font=ctk.CTkFont(size=14, weight="bold")
-            ).pack(padx=40, pady=(16, 8))
-
-            self.platform_menu = ctk.CTkOptionMenu(
-                card,
-                values=["LinkedIn", "Instagram", "Both"],
-                width=540,
-                height=40,
-                corner_radius=10,
-                fg_color="#20212B",
-                button_color=BORDER_PURPLE,
-                button_hover_color="#7C3AED",
-                font=ctk.CTkFont(size=14),
-            )
-            self.platform_menu.set("LinkedIn")
-            self.platform_menu.pack(padx=40, pady=(0, 20))
-
-        #INPUT CARD HEADING
+        # INPUT CARD HEADING
         ctk.CTkLabel(
             card, text="🤖 StalkerAI", font=ctk.CTkFont(size=22, weight="bold")
-        ).pack(padx=40, pady=(12, 2))
+        ).pack(padx=CARD_PAD, pady=(12, 2))
         ctk.CTkLabel(
             card, text="Profil", font=ctk.CTkFont(size=13), text_color=TEXT_MUTED
         ).pack(pady=(0, 8))
 
-
-        #INPUT CARD
+        # INPUT CARD
         for field, placeholder in PROFILE_FIELDS:
             entry = ctk.CTkEntry(
                 card,
                 placeholder_text=placeholder,
-                width=540,
-                height=40,
+                width=FIELD_W,
+                height=50,
                 corner_radius=10,
                 fg_color="#20212B",
                 border_width=1,
                 border_color="#2A2B36",
                 font=ctk.CTkFont(size=14),
-
             )
-            entry.pack(padx=40, pady=3)
+            entry.pack(padx=CARD_PAD, pady=3)
             self.profile_entries[field] = entry
 
-        #SPACE BETWEEN INPUT AND SAVE BUTTON
+        # SPACE BETWEEN INPUT AND SAVE BUTTON
         buttons = ctk.CTkFrame(card, fg_color="transparent")
-        buttons.pack(padx=40, pady=(16, 8), fill="x")
+        buttons.pack(padx=CARD_PAD, pady=(16, 8), fill="x")
         buttons.grid_columnconfigure(0, weight=1)
 
-        #INPUT SAVE BUTTON
+        # INPUT SAVE BUTTON
         ctk.CTkButton(
-            buttons, text="Save", height=40, corner_radius=10, width=340,
+            buttons, text="Save", height=40, corner_radius=10,
             fg_color=BORDER_PURPLE, hover_color="#7C3AED",
             font=ctk.CTkFont(size=14, weight="bold"),
             command=self.save_profile
@@ -142,7 +128,7 @@ class App(ctk.CTk):
         self.status_var = ctk.StringVar(value="")
         ctk.CTkLabel(
             card, textvariable=self.status_var,
-            font=ctk.CTkFont(size=12), text_color="#38BDF8"
+            font=ctk.CTkFont(size=12), text_color=BORDER_PURPLE
         ).pack(pady=(0, 20))
 
     def get_profile(self) -> PersonProfile:
@@ -161,14 +147,17 @@ class App(ctk.CTk):
         self.status_var.set("Searching...")
         self.update()  # repaint the status before the blocking calls below
 
-        name = self.profile.to_dict()["name"]
-        linkedin = asyncio.run(api.search_linkedin_accounts(name))
-        instagram = asyncio.run(api.search_instagram_accounts(name))
+        profile_dict = self.profile.to_dict()
+        linkedin = asyncio.run(api.search_linkedin_accounts(profile_dict))
+        instagram = asyncio.run(api.search_instagram_accounts(profile_dict))
         print("RAW LINKEDIN:", linkedin)
         print("RAW INSTAGRAM:", instagram)
 
         shown = self._show_results(linkedin or [], instagram or [])
+        self._update_overview(linkedin, instagram)
+        self._update_json(linkedin, instagram)
         self.status_var.set(f"Found {shown} profile(s)")
+        self._autosize()  # content height can change after a search
 
     def clear_profile(self):
         for entry in self.profile_entries.values():
@@ -182,23 +171,34 @@ class App(ctk.CTk):
             self, fg_color=CARD_BG, corner_radius=20,
             border_width=1, border_color=BORDER_PURPLE
         )
-        self.results_card.place(relx=0.5, y=420, anchor="n")
+        self.results_card.pack(pady=12)
 
         ctk.CTkLabel(
             self.results_card, text="Found profiles",
             font=ctk.CTkFont(size=14, weight="bold")
-        ).pack(padx=40, pady=(16, 8))
+        ).pack(padx=CARD_PAD, pady=(16, 8))
 
         self.results_box = ctk.CTkScrollableFrame(
-            self.results_card, width=540, height=160,
+            self.results_card, width=FIELD_W, height=250,
             fg_color="#20212B", corner_radius=10
         )
-        self.results_box.pack(padx=40, pady=(0, 20))
+        self.results_box.pack(padx=CARD_PAD, pady=(0, 20))
 
         self.no_results_lbl = ctk.CTkLabel(
             self.results_box, text="No search yet", text_color=TEXT_MUTED
         )
         self.no_results_lbl.pack(pady=10)
+
+        ctk.CTkLabel(
+            self.results_card, text="Overview", font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=BORDER_PURPLE
+        ).pack(anchor="w", padx=CARD_PAD, pady=(0, 2))
+
+        self.overview_lbl = ctk.CTkLabel(
+            self.results_card, text="No search yet", text_color=TEXT_MUTED,
+            justify="left", anchor="w", wraplength=FIELD_W - 20
+        )
+        self.overview_lbl.pack(anchor="w", padx=CARD_PAD, pady=(0, 20))
 
     def _render_result_list(self, parent, results):
         url_keys = ("linkedin_url", "instagram_url", "url", "profileUrl", "link", "profile_url", "href")
@@ -222,9 +222,8 @@ class App(ctk.CTk):
             row = ctk.CTkFrame(parent, fg_color="transparent")
             row.pack(fill="x", padx=6, pady=3)
 
-
             username = item.get("username") if isinstance(item, dict) else None
-            display = f"{name}  ({'@' + username})" if username else name
+            display = f"{name}  (@{username})" if username else name
             ctk.CTkLabel(row, text=display, anchor="w").pack(side="left", padx=(4, 0))
 
             if url:
@@ -253,6 +252,77 @@ class App(ctk.CTk):
         ig_count = self._render_result_list(self.results_box, instagram)
 
         return li_count + ig_count
+
+    def _update_overview(self, linkedin, instagram):
+        pieces = []
+        for item in (linkedin or []) + (instagram or []):
+            if isinstance(item, dict):
+                info = (item.get("info") or "").strip()
+                if info:
+                    pieces.append(info)
+
+        if not pieces:
+            self.overview_lbl.configure(text="No additional info found.")
+            return
+
+        seen = []
+        for p in pieces:
+            if p not in seen:
+                seen.append(p)
+        self.overview_lbl.configure(text=" · ".join(seen))
+
+    def _build_json_card(self):
+        self.json_card = ctk.CTkFrame(
+            self, fg_color=CARD_BG, corner_radius=20,
+            border_width=1, border_color=BORDER_PURPLE
+        )
+        self.json_card.pack(pady=(12, 24))
+
+        header = ctk.CTkFrame(self.json_card, fg_color="transparent")
+        header.pack(padx=CARD_PAD, pady=(16, 8), fill="x")
+        header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            header, text="Output (JSON)", font=ctk.CTkFont(size=14, weight="bold")
+        ).grid(row=0, column=0, sticky="w")
+
+        ctk.CTkButton(
+            header, text="Save to file", width=110, height=28, corner_radius=8,
+            fg_color=BORDER_PURPLE, hover_color="#7C3AED",
+            font=ctk.CTkFont(size=12), command=self._save_json
+        ).grid(row=0, column=1, sticky="e")
+
+        self.json_box = ctk.CTkTextbox(
+            self.json_card, width=FIELD_W, height=200,
+            fg_color="#20212B", corner_radius=10,
+            font=ctk.CTkFont(size=12, family="monospace")
+        )
+        self.json_box.pack(padx=CARD_PAD, pady=(0, 20))
+        self.json_box.insert("1.0", "{}")
+        self.json_box.configure(state="disabled")
+
+    def _update_json(self, linkedin, instagram):
+        data = {
+            "profile": self.profile.to_dict(),
+            "linkedin": linkedin or [],
+            "instagram": instagram or [],
+        }
+        text = json.dumps(data, indent=2, ensure_ascii=False)
+
+        self.json_box.configure(state="normal")
+        self.json_box.delete("1.0", "end")
+        self.json_box.insert("1.0", text)
+        self.json_box.configure(state="disabled")
+        self._last_json = text
+
+    def _save_json(self):
+        if not self._last_json:
+            return
+        path = os.path.join(os.getcwd(), "stalkerai_output.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self._last_json)
+        self.status_var.set(f"Saved to {path}")
+
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
