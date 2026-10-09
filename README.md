@@ -6,6 +6,12 @@ Find LinkedIn and Instagram profile candidates from one desktop app.
 - Rank results using similarity to user input.
 - Export search results as JSON.
 
+## Video
+
+<video src="media/demo.mp4" controls width="800"></video>
+
+<u>[Watch on YouTube](media/demo.mp4)</u>
+
 ## Run
 
 Create a `.env` file in the project root:
