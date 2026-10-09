@@ -77,6 +77,31 @@ def _location_text(value) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _education_schools(profile) -> list[str]:
+    """Keep institution names, excluding degrees, dates and unrelated profile text."""
+    names = []
+    for key in ("education", "educations"):
+        entries = profile.get(key) or []
+        if isinstance(entries, (Mapping, str)):
+            entries = [entries]
+        for entry in entries:
+            school = entry.get("schoolName") or entry.get("school") if isinstance(entry, Mapping) else entry
+            if isinstance(school, Mapping):
+                school = school.get("name")
+            if isinstance(school, str) and school.strip():
+                names.append(school.strip())
+    return list(dict.fromkeys(names))
+
+
+def _school_match_score(query: str, schools: list[str]) -> float:
+    tokens = set(_normalize_name(query).split())
+    if not tokens:
+        return 0.0
+    # Score each institution separately; never combine words from different schools.
+    return max((len(tokens & set(_normalize_name(school).split())) / len(tokens)
+                for school in schools), default=0.0)
+
+
 def init():
     global TOKEN
     TOKEN = os.getenv("APIFY_TOKEN")
@@ -113,7 +138,8 @@ async def search_linkedin_accounts(name, max_results: int = 10, *, city: str | N
     Matches are search candidates, not verified identities. info contains the
     profile headline and location when available.
     Accepts a name string, form dictionary, or PersonProfile object. Optional
-    city matches rank first among full-name matches, then school evidence.
+    Education matches rank first among full-name matches, followed by city.
+    A school query enables Full scraping to retrieve education history.
     Retrieval remains name-only so missing locations do not exclude candidates.
     Results are ranked by name similarity, ignoring case and accents;
     LinkedIn's original order is preserved for equally ranked matches.
@@ -131,7 +157,7 @@ async def search_linkedin_accounts(name, max_results: int = 10, *, city: str | N
     call_result = await apify_client.actor("harvestapi/linkedin-profile-search").call(
         run_input={
             "searchQuery": name,
-            "profileScraperMode": "Short",
+            "profileScraperMode": "Full" if fields["school"] else "Short",
             "maxItems": max(50, max_results * 5),
         }
     )
@@ -139,6 +165,7 @@ async def search_linkedin_accounts(name, max_results: int = 10, *, city: str | N
     accounts = []
     seen_urls = set()
     city_scores = {}
+    school_scores = {}
     dataset = apify_client.dataset(_run_dataset_id(call_result, "LinkedIn"))
     async for profile in dataset.iterate_items():
         url = profile.get("linkedinUrl")
@@ -150,15 +177,20 @@ async def search_linkedin_accounts(name, max_results: int = 10, *, city: str | N
         ).strip()
         location = _location_text(profile.get("location") or "")
         city_scores[url] = _city_match_score(fields, location)
+        schools = _education_schools(profile)
+        school_scores[url] = _school_match_score(fields["school"], schools)
         headline = profile.get("headline") or profile.get("position") or ""
         accounts.append({
             "name": full_name or profile.get("name") or "",
             "linkedin_url": url,
-            "info": " | ".join(part for part in (headline, location) if part),
+            "info": " | ".join(part for part in (
+                headline, location, "Education: " + "; ".join(schools) if schools else ""
+            ) if part),
         })
     def match_score(account):
         score = _name_match_score(name, account["name"])
-        return (score[1], city_scores[account["linkedin_url"]], score[0],
+        return (score[1], school_scores[account["linkedin_url"]],
+                city_scores[account["linkedin_url"]], score[0],
                 _context_match_score(fields, account), *score[2:])
 
     accounts.sort(key=match_score, reverse=True)
@@ -245,7 +277,7 @@ async def search_instagram_accounts(name, max_results: int = 10, *, city: str | 
         )
 
     accounts.sort(key=match_score, reverse=True)
-    return accounts[:max_results]
+    return list(filter(lambda x: x["name"] != "", accounts[:max_results]))
 
 
 async def scrape_ig_profile(username):
@@ -293,6 +325,6 @@ if __name__ == "__main__":
     load_dotenv()
     init()
 
-    result = asyncio.run(search_instagram_accounts({ "name": "Marek Hroz", "city": "Prague" }, max_results=10))
+    result = asyncio.run(search_instagram_accounts({ "name": "Radko Sablik", "city": "Prague", "school": "Smichovska Stredni" }, max_results=10))
 
     print(result)
