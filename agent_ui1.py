@@ -36,6 +36,18 @@ PROFILE_FIELDS = [
 ]
 
 
+def split_name(full_name: str) -> tuple[str, str]:
+    """'Jan  Novák Svoboda' -> ('Jan', 'Novák Svoboda').
+
+    split() without arguments handles any number of spaces/tabs and
+    ignores leading/trailing whitespace, so extra spaces are never a problem.
+    """
+    parts = full_name.split()
+    if not parts:
+        return "", ""
+    return parts[0], " ".join(parts[1:])
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -50,7 +62,8 @@ class App(ctk.CTk):
         # A single cell with weight=1 and no sticky -> the card stays centered
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
-
+        self.bind("<Return>", lambda e: self.save_profile())
+        self.bind("<KP_Enter>", lambda e: self.save_profile())
         self._build_card()
 
     def _build_card(self):
