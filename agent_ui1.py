@@ -3,9 +3,10 @@
 Fields (name, school, city) -> PersonProfile object.
 The single "Name" field is split on whitespace: first word -> name, the rest -> surname.
 """
-
+import os
 from dataclasses import dataclass, asdict
-
+import asyncio
+import api
 import customtkinter as ctk
 
 BG_DARK = "#0D0E12"       # Window background
@@ -126,6 +127,7 @@ class App(ctk.CTk):
         print(self.profile)
         print(self.profile.to_dict())
         self.status_var.set("Profile saved")
+        print(asyncio.run(api.search_linkedin_accounts(self.profile.to_dict()["name"])))
 
     def clear_profile(self):
         for entry in self.profile_entries.values():
@@ -136,4 +138,8 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
+    api.init()
+    print(f".env test: {os.getenv('TEST')}")
     App().mainloop()
