@@ -12,7 +12,7 @@ Create a `.env` file in the project root:
 
 ```dotenv
 APIFY_TOKEN=your_apify_api_key
-TEST=local
+TEST=ok!
 ```
 
 `TEST` is the startup diagnostic text. Then run:
