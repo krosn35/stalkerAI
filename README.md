@@ -8,9 +8,7 @@ Find LinkedIn and Instagram profile candidates from one desktop app.
 
 ## Video
 
-<video src="media/demo.mp4" controls width="800"></video>
-
-<u>[Watch on YouTube](https://youtu.be/36GPe3UtTY4)</u>
+[![Watch on YouTube](https://img.youtube.com/vi/36GPe3UtTY4/hqdefault.jpg)](https://youtu.be/36GPe3UtTY4)
 
 ## Run
 
