@@ -21,7 +21,6 @@ ctk.set_default_color_theme("blue")
 class PersonProfile:
     """Output object produced by the form."""
     name: str = ""
-    surname: str = ""
     school: str = ""
     city: str = ""
 
@@ -63,7 +62,8 @@ class App(ctk.CTk):
         # A single cell with weight=1 and no sticky -> the card stays centered
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
-
+        self.bind("<Return>", lambda e: self.save_profile())
+        self.bind("<KP_Enter>", lambda e: self.save_profile())
         self._build_card()
 
     def _build_card(self):
@@ -115,10 +115,8 @@ class App(ctk.CTk):
     def get_profile(self) -> PersonProfile:
         """Read the form and return it as a PersonProfile object."""
         values = {k: e.get().strip() for k, e in self.profile_entries.items()}
-        name, surname = split_name(values["name"])
         return PersonProfile(
-            name=name,
-            surname=surname,
+            name=values["name"],
             school=values["school"],
             city=values["city"],
         )
